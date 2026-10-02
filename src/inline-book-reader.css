@@ -1,0 +1,247 @@
+/* 3F fullscreen reader: a single geometry system for a two-page square spread. */
+.three-floor-book-reader-backdrop {
+  position: fixed;
+  z-index: 1000;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  box-sizing: border-box;
+  overflow: hidden;
+  padding: 48px 23px 23px;
+  background: #111d;
+}
+
+.three-floor-book-reader-dialog {
+  position: relative;
+  box-sizing: border-box;
+  width: min(calc(100vw - 46px), calc((100dvh - 71px) * 2));
+  max-width: 100%;
+  max-height: 100%;
+  aspect-ratio: 2 / 1;
+  overflow: visible;
+  outline: none;
+}
+
+.three-floor-book-reader-dialog > .inline-book,
+.three-floor-book-reader-dialog > .inline-book > .book-stage {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+.three-floor-book-reader-dialog .book-stage {
+  display: block;
+  aspect-ratio: auto;
+  perspective: 1450px;
+  perspective-origin: 50% 50%;
+  background: transparent;
+}
+
+.three-floor-book-reader-dialog .real-spread {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-rows: minmax(0, 1fr);
+  width: auto;
+  height: auto;
+  max-width: none;
+  max-height: none;
+  gap: 0;
+  padding: 0;
+  overflow: hidden;
+  filter: drop-shadow(0 22px 28px #15171225);
+  transform: none;
+  animation: none;
+}
+
+.three-floor-book-reader-dialog .real-spread.cover-only {
+  inset: 0 auto 0 auto;
+  width: 50%;
+  aspect-ratio: 1 / 1;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+}
+
+.three-floor-book-reader-dialog .real-spread.cover-only.front-cover {
+  right: 0;
+  margin: 0 0 0 auto;
+}
+
+.three-floor-book-reader-dialog .real-spread.cover-only.back-cover {
+  left: 0;
+  margin: 0 auto 0 0;
+}
+
+.three-floor-book-reader-dialog .pdf-leaf {
+  position: relative;
+  box-sizing: border-box;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  background: #fff;
+}
+
+.three-floor-book-reader-dialog .pdf-leaf canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  max-height: none;
+  margin: 0;
+  padding: 0;
+  object-fit: fill;
+  transform: none;
+  backface-visibility: hidden;
+}
+
+.three-floor-book-reader-dialog .real-spread:not(.cover-only) .pdf-leaf:first-child {
+  box-shadow: inset -8px 0 12px -12px #1118;
+}
+
+.three-floor-book-reader-dialog .real-spread:not(.cover-only) .pdf-leaf:nth-child(2) {
+  box-shadow: inset 8px 0 12px -12px #1118;
+}
+
+.three-floor-book-reader-dialog .real-spread:not(.cover-only)::after {
+  position: absolute;
+  z-index: 2;
+  top: 0;
+  bottom: 0;
+  left: calc(50% - 22px);
+  width: 44px;
+  pointer-events: none;
+  background: linear-gradient(90deg, transparent, #24262018 25%, #24262040 48%, #fff9 53%, #24262024 76%, transparent);
+  filter: blur(2px);
+  content: "";
+}
+
+.three-floor-book-reader-dialog .page-hit-areas {
+  position: absolute;
+  z-index: 5;
+  inset: 0;
+  display: flex;
+}
+
+.three-floor-book-reader-dialog .page-hit-areas button {
+  width: 50%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.three-floor-book-reader-dialog .page-hit-areas button:disabled { cursor: default; }
+.three-floor-book-reader-dialog .page-hit-areas button:focus-visible { outline: 2px solid #71717a; outline-offset: -3px; }
+
+.three-floor-book-reader-dialog .page-turn-underlay {
+  position: absolute;
+  z-index: 1;
+  inset: 0;
+  pointer-events: none;
+}
+
+.three-floor-book-reader-dialog .page-turn-underlay .pdf-leaf {
+  position: absolute;
+  top: 0;
+  width: 50%;
+  height: 100%;
+  object-fit: fill;
+}
+
+.three-floor-book-reader-dialog .page-turn-underlay.forward .pdf-leaf { right: 0; }
+.three-floor-book-reader-dialog .page-turn-underlay.backward .pdf-leaf { left: 0; }
+
+.three-floor-book-reader-dialog .page-turn-overlay {
+  position: absolute;
+  z-index: 4;
+  top: 0;
+  bottom: 0;
+  width: 50%;
+  overflow: hidden;
+  pointer-events: none;
+  transform-style: preserve-3d;
+  backface-visibility: hidden;
+  will-change: transform;
+}
+
+.three-floor-book-reader-dialog .page-turn-overlay.forward {
+  left: 50%;
+  transform-origin: left center;
+  animation: reader-page-next .24s cubic-bezier(.4, 0, .2, 1) forwards;
+}
+
+.three-floor-book-reader-dialog .page-turn-overlay.backward {
+  left: 0;
+  transform-origin: right center;
+  animation: reader-page-previous .24s cubic-bezier(.4, 0, .2, 1) forwards;
+}
+
+.three-floor-book-reader-dialog .page-turn-face {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: fill;
+  transform: none;
+  backface-visibility: hidden;
+}
+
+.three-floor-book-reader-dialog .page-turn-back { transform: rotateY(180deg); }
+
+.three-floor-book-reader-close {
+  position: absolute;
+  z-index: 4;
+  top: -42px;
+  right: 0;
+  width: 42px;
+  padding: 0;
+  color: #fff;
+  border: 0;
+  background: transparent;
+  font: 300 34px/1 Arial, sans-serif;
+  text-align: right;
+  cursor: pointer;
+}
+
+@keyframes reader-page-next {
+  from { transform: rotateY(0deg); }
+  to { transform: rotateY(-180deg); }
+}
+
+@keyframes reader-page-previous {
+  from { transform: rotateY(0deg); }
+  to { transform: rotateY(180deg); }
+}
+
+@media (max-width: 650px) {
+  .three-floor-book-reader-backdrop { padding: 56px 12px 12px; }
+  .three-floor-book-reader-dialog {
+    width: min(calc(100vw - 24px), calc((100dvh - 68px) * 2));
+  }
+  .three-floor-book-reader-close { top: -42px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .three-floor-book-reader-dialog .page-turn-overlay.forward,
+  .three-floor-book-reader-dialog .page-turn-overlay.backward { animation-duration: .01ms; }
+}
+
+/* Portrait variant of the shared reader, used on 4F. */
+.three-floor-book-reader-dialog.four-floor-book-reader-dialog { width: min(calc(100vw - 48px), calc((100dvh - 120px) * 1.5)); aspect-ratio: 3 / 2; }
+.three-floor-book-reader-dialog.four-floor-book-reader-dialog .real-spread.cover-only { width: 50%; height: 100%; aspect-ratio: 3 / 4; }
+.three-floor-book-reader-dialog.four-floor-book-reader-dialog .pdf-leaf { aspect-ratio: 3 / 4; }
+@media (max-width: 650px) { .three-floor-book-reader-dialog.four-floor-book-reader-dialog { width: min(calc(100vw - 24px), calc((100dvh - 110px) * 1.5)); } }
+.three-floor-book-reader-dialog.four-floor-book-reader-dialog .book-guestbook-cover { z-index: 6; }
