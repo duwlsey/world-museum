@@ -1,17 +1,14 @@
+import { createBookPageSource, type CreatedBook } from './createdBookPages'
+import { preloadBookPreview, preloadBookReader, type BookPageSource } from './bookSources'
 import { useBackgroundMusic } from './backgroundMusic'
-import InlineBook, { preloadBookPreview } from './InlineBook'
+import { loadYouTubeApi, setVideoPlaying } from './videoPlayback'
+import InlineBook from './InlineBook'
 import { AnimatePresence, motion } from 'framer-motion'
 import { useEffect, useLayoutEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { Link, NavLink, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import { jsPDF } from 'jspdf'
 import { useAuth, type Role } from './auth'
 import { supabase, guestbookClient } from './supabase'
-
-declare global {
-  interface Window {
-    google?: { translate?: { TranslateElement: new (options: { pageLanguage: string; autoDisplay?: boolean }, elementId: string) => unknown } }
-  }
-}
 
 const floors = [
   { floor: '4F', title: 'FROM YOU', to: '/4f', text: '나도 작가 아틀리에' },
@@ -20,8 +17,6 @@ const floors = [
   { floor: '1F', title: 'WORLD DOCENT', to: '/1f', text: '프로젝트 소개' },
 ]
 const roleLabel: Record<Role, string> = { teacher: 'TEACHER', author: '✏️ AUTHOR', student: 'STUDENT' }
-type StoryPage = { plot?: string; text: string; scene?: string; image?: string; loading?: boolean }
-type CreatedBook = { id: string; owner_id?: string; ownerUsername?: string; title: string; author: string; synopsis: string; coverColor?: string; coverImage?: string; coverCredit?: string; coverLicense?: string; coverSource?: string; publishedAt?: string; style?: string; seed?: number; character?: string; world?: string; reference?: string; pages: StoryPage[] }
 type MuseumNote = { id: string; floor: '3f' | '4f'; artist_index: number | null; book_id: string | null; owner_id: string; owner_username: string; owner_role: Role | 'guest'; body: string; created_at: string }
 type CmsArtist = { name: string; title: string; scope: string; pdf?: string; video?: string }
 type FooterContent = { copyright: string; projectLabel: string; teacherLabel: string; email: string }
@@ -45,19 +40,7 @@ function BookCover({ book, className = '' }: { book: CreatedBook; className?: st
 function Header({ visible, openAuth }: { visible: boolean; openAuth: (mode: 'login' | 'signup') => void }) {
   const { user, logout } = useAuth()
   const { pathname } = useLocation()
-  const [languageOpen, setLanguageOpen] = useState(false)
-  useEffect(() => {
-    const mountTranslate = () => {
-      const element = document.getElementById('google_translate_element')
-      if (!element || element.dataset.initialized || !window.google?.translate?.TranslateElement) return
-      new window.google.translate.TranslateElement({ pageLanguage: 'en', autoDisplay: false }, 'google_translate_element')
-      element.dataset.initialized = 'true'
-    }
-    mountTranslate(); window.addEventListener('googleTranslateReady', mountTranslate)
-    return () => window.removeEventListener('googleTranslateReady', mountTranslate)
-  }, [])
-  const chooseLanguage = (language: string) => { const combo = document.querySelector('.goog-te-combo') as HTMLSelectElement | null; if (combo) { combo.value = language; combo.dispatchEvent(new Event('change')) }; setLanguageOpen(false) }
-  return <header className={`site-header ${pathname === '/' ? 'home-header' : ''} ${visible ? 'is-visible' : ''}`}><div className="header-left"><Link className="brand" to="/" onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}>WORLD MUSEUM</Link></div><div id="google_translate_element" className="translate-slot" aria-hidden="true" /><div className="header-right"><nav aria-label="Museum floors">{user?.id === 'admin1' ? <NavLink className="basement-link" to="/admin">[ B1 ]</NavLink> : <span className="basement-placeholder" aria-hidden="true" />}{[...floors].reverse().map(({ floor, to }) => <NavLink key={floor} to={to}>[ {floor} ]</NavLink>)}</nav><div className="language-menu"><button onClick={() => setLanguageOpen(!languageOpen)} aria-expanded={languageOpen}>[ EN ▾ ]</button>{languageOpen && <div className="language-popover"><button onClick={() => chooseLanguage('en')}>English</button><button onClick={() => chooseLanguage('ko')}>한국어</button><button onClick={() => chooseLanguage('ja')}>日本語</button></div>}</div>{user ? <div className="user-menu"><span><span className="header-account-name" title={user.nickname}>{user.nickname}</span><em>{roleLabel[user.role]}</em></span><button onClick={logout}>Log Out</button></div> : <div className="auth-links"><button onClick={() => openAuth('signup')}>Sign Up</button><button onClick={() => openAuth('login')}>Log In</button></div>}</div></header>
+  return <header className={`site-header ${pathname === '/' ? 'home-header' : ''} ${visible ? 'is-visible' : ''}`}><div className="header-left"><Link translate="no" className="brand notranslate" to="/" onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}>WORLD MUSEUM</Link></div><div className="header-right"><nav aria-label="Museum floors">{user?.id === 'admin1' ? <NavLink className="basement-link" to="/admin">[ B1 ]</NavLink> : <span className="basement-placeholder" aria-hidden="true" />}{[...floors].reverse().map(({ floor, to }) => <NavLink key={floor} to={to}>[ {floor} ]</NavLink>)}</nav>{user ? <div className="user-menu"><span><span className="header-account-name" title={user.nickname}>{user.nickname}</span><em>{roleLabel[user.role]}</em></span><button onClick={logout}>Log Out</button></div> : <div className="auth-links"><button onClick={() => openAuth('signup')}>Sign Up</button><button onClick={() => openAuth('login')}>Log In</button></div>}</div></header>
 }
 
 function Footer({ sound, toggleSound, content }: { sound: boolean; toggleSound: () => void; content: FooterContent }) {
@@ -74,7 +57,7 @@ function Footer({ sound, toggleSound, content }: { sound: boolean; toggleSound: 
 }
 
 function Entrance({ activateHeader }: { activateHeader: () => void }) {
-  return <main className="entrance monochrome-entrance"><div className="landing-sequence"><section className="gallery-prologue"><div className="prologue-copy"><p className="prologue-kicker">WORLD DOCENT</p><h1 aria-label="WORLD MUSEUM">W<span className="rwanda-o" aria-hidden="true">O</span>RLD MUSEUM</h1><p className="prologue-sub">An Archive of Children's Voices &amp; Global Citizenship</p></div><p className="scroll-indicator"><i aria-hidden="true" /><span>SCROLL TO ENTER</span></p></section></div><section className="directory gallery-directory" onMouseEnter={activateHeader}><motion.div initial={{ opacity: 0, y: 16 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }} className="directory-heading"><p>FLOOR DIRECTORY</p><h2>Explore the collection</h2></motion.div><div className="floor-list">{[...floors].reverse().map((item, index) => <motion.div key={item.floor} initial={{ opacity: 0, y: 14 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true, amount: .25 }} transition={{ duration: .45, delay: index * .07 }}><Link className="floor-card" to={item.to}><span className="floor-no">{item.floor}</span><div><h3>{item.title}</h3><p>{item.text}</p></div><b>↗</b></Link></motion.div>)}</div></section></main>
+  return <main className="entrance monochrome-entrance"><div className="landing-sequence"><section className="gallery-prologue"><div className="prologue-copy"><p className="prologue-kicker">WORLD DOCENT</p><h1 aria-label="WORLD MUSEUM" translate="no" className="notranslate">W<span className="rwanda-o" aria-hidden="true">O</span>RLD MUSEUM</h1><p className="prologue-sub">An Archive of Children's Voices &amp; Global Citizenship</p></div><p className="scroll-indicator"><i aria-hidden="true" /><span>SCROLL TO ENTER</span></p></section></div><section className="directory gallery-directory" onMouseEnter={activateHeader}><motion.div initial={{ opacity: 0, y: 16 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }} className="directory-heading"><p>FLOOR DIRECTORY</p><h2>Explore the collection</h2></motion.div><div className="floor-list">{[...floors].reverse().map((item, index) => <motion.div key={item.floor} initial={{ opacity: 0, y: 14 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true, amount: .25 }} transition={{ duration: .45, delay: index * .07 }}><Link className="floor-card" to={item.to}><span className="floor-no">{item.floor}</span><div><h3>{item.title}</h3><p>{item.text}</p></div><b>↗</b></Link></motion.div>)}</div></section></main>
 }
 
 function GalleryPage({ item }: { item: typeof floors[number] }) {
@@ -253,7 +236,7 @@ function FourthFloorPage({ books, publish, updateBook, notes, addNote, updateNot
     return () => { active = false }
   }, [user])
   const [wizard, setWizard] = useState(false), [openBook, setOpenBook] = useState<CreatedBook | null>(null)
-  return <main className="atelier"><FloorMarker floor="4F" title="FROM YOU" /><section className="atelier-head"><p className="eyebrow">ATELIER · MAKE A BOOK</p><h1>Create your own book</h1></section><section className="corridor" aria-label="Published bookshelves">{Array.from({ length: Math.ceil((books.length + 1) / 3) }, (_, row) => <div className="bookshelf-row" key={row}>{row === 0 && <button className="create-frame" onClick={() => { if (user) setWizard(true); else openLogin() }}><span>+</span><strong>Create Your Book</strong><small>BEGIN A NEW BOOK</small></button>}{books.slice(row === 0 ? 0 : row * 3 - 1, row * 3 + 2).map((book) => <div className="shelf-book" key={book.id}>{user && (user.id === 'admin1' || (ownerId && book.owner_id === ownerId)) && <div className="shelf-book-actions"><button onClick={() => setEditingBook(book)}>Edit</button>{user.id === 'admin1' && <button onClick={() => void deleteBook(book.id)}>Delete</button>}</div>}<button className="published-frame" onClick={() => setOpenBook(book)} aria-label={`Read ${book.title}`}><BookCover book={book} /></button></div>)}</div>)}</section><AnimatePresence>{editingBook && <BookWizard key={editingBook.id} initialBook={editingBook} close={() => setEditingBook(null)} publish={publish} />}{wizard && <BookWizard close={() => setWizard(false)} publish={publish} />}{openBook && <PublishedBook book={openBook} updateBook={updateBook} notes={notes.filter((note) => note.floor === '4f' && note.book_id === openBook.id)} addNote={addNote} updateNote={updateNote} deleteNote={deleteNote} close={() => setOpenBook(null)} />}</AnimatePresence></main>
+  return <main className="atelier"><FloorMarker floor="4F" title="FROM YOU" /><section className="atelier-head"><p className="eyebrow">ATELIER · MAKE A BOOK</p><h1>Create your own book</h1></section><section className="corridor" aria-label="Published bookshelves">{Array.from({ length: Math.ceil((books.length + 1) / 3) }, (_, row) => <div className="bookshelf-row" key={row}>{row === 0 && <button className="create-frame" onClick={() => { if (user) setWizard(true); else openLogin() }}><span>+</span><strong>Create Your Book</strong><small>BEGIN A NEW BOOK</small></button>}{books.slice(row === 0 ? 0 : row * 3 - 1, row * 3 + 2).map((book) => <div className="shelf-book" key={book.id}>{user && (user.id === 'admin1' || (ownerId && book.owner_id === ownerId)) && <div className="shelf-book-actions"><button onClick={() => setEditingBook(book)}>Edit</button>{user.id === 'admin1' && <button onClick={() => void deleteBook(book.id)}>Delete</button>}</div>}<button className="published-frame" onPointerEnter={() => { void createBookPageSource(book).then((source) => source.render(1, 960)).catch(() => undefined) }} onFocus={() => { void createBookPageSource(book).then((source) => source.render(1, 960)).catch(() => undefined) }} onClick={() => setOpenBook(book)} aria-label={`Read ${book.title}`}><BookCover book={book} /></button></div>)}</div>)}</section><AnimatePresence>{editingBook && <BookWizard key={editingBook.id} initialBook={editingBook} close={() => setEditingBook(null)} publish={publish} />}{wizard && <BookWizard close={() => setWizard(false)} publish={publish} />}{openBook && <PublishedBook book={openBook} updateBook={updateBook} notes={notes.filter((note) => note.floor === '4f' && note.book_id === openBook.id)} addNote={addNote} updateNote={updateNote} deleteNote={deleteNote} close={() => setOpenBook(null)} />}</AnimatePresence></main>
 }
 
 function BookWizard({ close, publish, initialBook }: { close: () => void; publish: (book: CreatedBook) => Promise<boolean>; initialBook?: CreatedBook }) {
@@ -325,82 +308,15 @@ async function getBookOwnerUsername(book: CreatedBook) {
 }
 
 async function buildCreatedBookPdf(book: CreatedBook) {
-    const ownerUsername = await getBookOwnerUsername(book)
-    await document.fonts.ready
-    const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: [150, 200] })
-    const canvas = document.createElement('canvas'); canvas.width = 1200; canvas.height = 1600
-    const ctx = canvas.getContext('2d')!
-    ctx.textAlign = 'left'
-    let cover: HTMLImageElement | null = null
-    const source = book.coverImage || book.reference
-    if (source) cover = await new Promise<HTMLImageElement>((resolve, reject) => { const image = new Image(); image.crossOrigin = 'anonymous'; image.onload = () => resolve(image); image.onerror = () => reject(new Error('The cover image could not be downloaded. Please try again.')); image.src = source })
-    const linesFor = (text: string, width: number) => {
-      const lines: string[] = []
-      for (const paragraph of text.split('\n')) {
-        let line = ''
-        for (const word of paragraph.trim().split(/\s+/).filter(Boolean)) {
-          const candidate = line ? line + ' ' + word : word
-          if (line && ctx.measureText(candidate).width > width) { lines.push(line); line = word }
-          else line = candidate
-        }
-        lines.push(line)
-      }
-      return lines
-    }
-    const wrap = (text: string, x: number, y: number, width: number, lineHeight: number) => {
-      linesFor(text, width).forEach((line, index) => ctx.fillText(line, x, y + index * lineHeight))
-    }
-    const add = (index: number) => { if (index) pdf.addPage([150, 200], 'portrait'); pdf.addImage(canvas.toDataURL('image/jpeg', .92), 'JPEG', 0, 0, 150, 200) }
-    const paintCover = (front: boolean) => {
-      ctx.fillStyle = book.coverColor || '#dce3e3'; ctx.fillRect(0, 0, 1200, 1600)
-      if (cover) { const scale = Math.max(1200 / cover.width, 1600 / cover.height); ctx.drawImage(cover, (1200 - cover.width * scale) / 2, (1600 - cover.height * scale) / 2, cover.width * scale, cover.height * scale) }
-      if (front) {
-        const panelX = 80, panelWidth = 1040, inset = 48
-        let titleSize = 72
-        ctx.font = '600 ' + titleSize + 'px Inter, Arial, sans-serif'
-        while (titleSize > 32 && (linesFor(book.title, panelWidth - inset * 2).length > 4 || linesFor(book.title, panelWidth - inset * 2).some((line) => ctx.measureText(line).width > panelWidth - inset * 2))) {
-          titleSize -= 2; ctx.font = '600 ' + titleSize + 'px Inter, Arial, sans-serif'
-        }
-        const titleLines = linesFor(book.title, panelWidth - inset * 2)
-        const titleLineHeight = titleSize * 1.25
-        ctx.font = '36px Inter, Arial, sans-serif'
-        const authorLines = linesFor('by ' + book.author, panelWidth - inset * 2)
-        const contentHeight = titleLines.length * titleLineHeight + 30 + authorLines.length * 48
-        const panelHeight = contentHeight + inset * 2
-        const panelY = 1520 - panelHeight
-        ctx.fillStyle = '#f7f5eef2'; ctx.fillRect(panelX, panelY, panelWidth, panelHeight)
-        ctx.fillStyle = '#222'; ctx.font = '600 ' + titleSize + 'px Inter, Arial, sans-serif'
-        const titleY = panelY + (panelHeight - contentHeight) / 2 + titleSize
-        titleLines.forEach((line, index) => ctx.fillText(line, panelX + inset, titleY + index * titleLineHeight))
-        ctx.fillStyle = '#54584f'; ctx.font = '36px Inter, Arial, sans-serif'
-        const authorY = titleY + (titleLines.length - 1) * titleLineHeight + titleSize * .25 + 30 + 36
-        authorLines.forEach((line, index) => ctx.fillText(line, panelX + inset, authorY + index * 48))
-      }
-    }
-    paintCover(true); add(0)
-    book.pages.forEach((page, index) => {
-      ctx.fillStyle = '#fdfcf9'; ctx.fillRect(0, 0, 1200, 1600); ctx.fillStyle = '#777'; ctx.font = '24px Inter, Arial, sans-serif'; ctx.fillText(page.plot || book.title, 100, 100)
-      ctx.fillStyle = '#292d29'
-      let bodySize = 72
-      ctx.font = bodySize + 'px Inter, Arial, sans-serif'
-      while (bodySize > 24 && (linesFor(page.text, 1000).length * bodySize * 1.5 > 1180 || linesFor(page.text, 1000).some((line) => ctx.measureText(line).width > 1000))) { bodySize -= 2; ctx.font = bodySize + 'px Inter, Arial, sans-serif' }
-      wrap(page.text, 100, 260, 1000, bodySize * 1.5); ctx.font = '24px Inter, Arial, sans-serif'; ctx.fillText(String(index + 1), 580, 1510); add(index + 1)
-    })
-    ctx.fillStyle = '#fdfcf9'; ctx.fillRect(0, 0, 1200, 1600)
-    const information = 'Author: ' + book.author + (ownerUsername ? ' (' + ownerUsername + ')' : '') + '\nPublished by World Museum\n' + (book.publishedAt ? new Date(book.publishedAt).toLocaleDateString('en-GB') : '') + (book.coverCredit ? '\nCover image: ' + book.coverCredit + '\n' + (book.coverLicense || '') + '\n' + (book.coverSource || '') : '')
-    ctx.fillStyle = '#292d29'; ctx.font = '30px Inter, Arial, sans-serif'
-    const informationLines = linesFor(information, 1000)
-    const informationTop = 1480 - (informationLines.length - 1) * 48
-    ctx.font = '48px Inter, Arial, sans-serif'
-    const titleLines = linesFor(book.title, 1000)
-    const titleTop = informationTop - 90 - (titleLines.length - 1) * 65
-    titleLines.forEach((line, index) => ctx.fillText(line, 100, titleTop + index * 65))
-    ctx.font = '30px Inter, Arial, sans-serif'
-    informationLines.forEach((line, index) => ctx.fillText(line, 100, informationTop + index * 48))
-    add(book.pages.length + 1)
-    if (book.pages.length % 2 === 0) { ctx.fillStyle = '#fdfcf9'; ctx.fillRect(0, 0, 1200, 1600); add(book.pages.length + 2) }
-    paintCover(false); add(book.pages.length + 3)
-    return pdf
+  const source = await createBookPageSource(book)
+  const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: [150, 200] })
+  for (let number = 1; number <= source.numPages; number++) {
+    const canvas = await source.render(number, 1200)
+    if (number > 1) pdf.addPage([150, 200], 'portrait')
+    pdf.addImage(canvas.toDataURL('image/jpeg', .92), 'JPEG', 0, 0, 150, 200)
+    await new Promise<void>((resolve) => setTimeout(resolve, 0))
+  }
+  return pdf
 }
 async function downloadCreatedBook(book: CreatedBook) {
   try { const pdf = await buildCreatedBookPdf(book); pdf.save((book.title || 'world-museum-book').replace(/[<>:"/\\|?*]/g, '-') + '.pdf') }
@@ -409,23 +325,19 @@ async function downloadCreatedBook(book: CreatedBook) {
 
 function PublishedBook({ book, close, notes, addNote, updateNote, deleteNote }: { book: CreatedBook; close: () => void; updateBook?: (book: CreatedBook) => void; notes: MuseumNote[]; addNote: (floor: '3f' | '4f', artistIndex: number | null, bookId: string | null, body: string) => Promise<void>; updateNote: (id: string, body: string) => Promise<void>; deleteNote: (id: string) => Promise<void> }) {
   const [showGuestbook, setShowGuestbook] = useState(false)
-  const [source, setSource] = useState('')
+  const [source, setSource] = useState<BookPageSource | null>(null)
   const [error, setError] = useState('')
   const [attempt, setAttempt] = useState(0)
   useEffect(() => {
     let active = true
-    let url = ''
-    setSource(''); setError('')
-    void buildCreatedBookPdf(book).then((pdf) => {
-      if (!active) return
-      url = URL.createObjectURL(pdf.output('blob'))
-      setSource(url)
-    }).catch((error) => { if (active) setError(error instanceof Error ? error.message : 'Could not open this book.') })
-    return () => { active = false; if (url) URL.revokeObjectURL(url) }
+    setSource(null); setError('')
+    void createBookPageSource(book).then((pages) => { if (active) setSource(pages) })
+      .catch((error) => { if (active) setError(error instanceof Error ? error.message : 'Could not open this book.') })
+    return () => { active = false }
   }, [book, attempt])
   return <ExhibitOverlay close={close} actions={!showGuestbook && <button className="exhibit-download" onClick={() => void downloadCreatedBook(book)} aria-label="Download book as PDF" title="Download book as PDF"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v11m0 0 4-4m-4 4-4-4M5 17v3h14v-3" /></svg></button>}>
     <div className="three-floor-book-reader-dialog four-floor-book-reader-dialog" style={{ display: showGuestbook ? 'none' : undefined }}>
-      {source ? <InlineBook src={source} title={book.title} onVisitGuestbook={() => setShowGuestbook(true)} /> : <div className="four-reader-loading" role="status">{error || 'Opening your book…'}{error && <button onClick={() => setAttempt((value) => value + 1)}>Retry</button>}</div>}
+      {source ? <InlineBook source={source} title={book.title} onVisitGuestbook={() => setShowGuestbook(true)} /> : <div className="four-reader-loading" role="status"><BookCover book={book} className="reader-loading-cover" /><span>{error || 'Preparing your book…'}</span>{error && <button onClick={() => setAttempt((value) => value + 1)}>Retry</button>}</div>}
     </div>
     {showGuestbook && <section className="book-notes-dashboard four-guestbook-dialog"><p className="eyebrow">GUESTBOOK</p><h2>{book.title}</h2><div className="three-showcase"><InlineGuestbook notes={notes} artistIndex={0} floor="4f" bookId={book.id} addNote={addNote} updateNote={updateNote} deleteNote={deleteNote} /></div><button className="return-to-book" onClick={() => setShowGuestbook(false)}>← Return to the book</button></section>}
   </ExhibitOverlay>
@@ -458,7 +370,7 @@ function ThreeFPage({ notes, addNote, updateNote, deleteNote, cms }: { notes: Mu
   return <main className="three-floor"><FloorMarker floor="3F" title="FROM JANGHEUNG, KOREA" /><section className="three-head">
     <div className="three-scope-picker"><p className="eyebrow">STUDENT AUTHORS · RE-CREATIONS</p><div className="artist-tabs scope-tabs" role="tablist" aria-label="Choose the scope of the story">{defaultCms.artists.map((_, index) => <button key={index} type="button" role="tab" aria-label={['Around Me', 'Around Us', 'Around the World'][index]} aria-selected={selected === index} onClick={() => { setSelected(index); setShowBook(false) }} className={`scope-${['me', 'us', 'world'][index]}${selected === index ? ' active' : ''}`}>{scopes[index]}</button>)}</div>{selected === null && <p className="scope-instruction" aria-live="polite">Choose a story to explore</p>}</div>
   </section>{selected !== null && <AnimatePresence mode="wait"><motion.div className="selected-story" key={selected} initial={{ opacity: 0, y: 28 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true, amount: .01 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: .75, ease: [0.22, 1, 0.36, 1] }}><header className="three-story-heading"><h1>{bookTitle}<span className="book-author">{artist.name}</span></h1></header><section className="three-gallery inline-exhibition three-showcase" aria-label="Story exhibition">
-    <div className="showcase-column showcase-book-column"><p className="showcase-label">THE BOOK</p><button className="showcase-cover-button" onClick={() => setShowBook(true)} aria-label={`Read ${bookTitle}`}><InlineBook key={pdf} src={pdf} title={bookTitle} preview /></button></div>
+    <div className="showcase-column showcase-book-column"><p className="showcase-label">THE BOOK</p><button className="showcase-cover-button" onPointerEnter={() => { void preloadBookReader(pdf).catch(() => undefined) }} onFocus={() => { void preloadBookReader(pdf).catch(() => undefined) }} onClick={() => setShowBook(true)} aria-label={`Read ${bookTitle}`}><InlineBook key={pdf} src={pdf} title={bookTitle} preview /></button></div>
     <div className="showcase-column showcase-film-column"><p className="showcase-label">DOCENT FILM</p><InlineVideo key={video} source={video} /></div>
     <div className="showcase-column showcase-guestbook"><div className="showcase-guestbook-heading"><p className="showcase-label">GUESTBOOK</p></div><InlineGuestbook notes={selectedNotes} artistIndex={selected} addNote={addNote} updateNote={updateNote} deleteNote={deleteNote} /></div>
   </section></motion.div></AnimatePresence>}<AnimatePresence>{selected !== null && showBook && <BookReadingModal src={pdf} title={bookTitle} close={() => setShowBook(false)} />}</AnimatePresence></main>
@@ -497,6 +409,18 @@ function BookReadingModal({ src, title, close }: { src: string; title: string; c
 }
 
 function InlineVideo({ source }: { source: string }) {
+  const iframe = useRef<HTMLIFrameElement>(null)
+  const identity = useRef<object>({})
+  useEffect(() => {
+    let disposed = false
+    let player: { destroy: () => void } | undefined
+    const token = identity.current
+    if (iframe.current) void loadYouTubeApi().then((api) => {
+      if (disposed || !iframe.current) return
+      player = new api.Player(iframe.current, { events: { onStateChange: ({ data }) => { if (!disposed) setVideoPlaying(token, data === 1 || data === 3) } } })
+    })
+    return () => { disposed = true; player?.destroy(); setVideoPlaying(token, false) }
+  }, [source])
   let videoId = ''
   try {
     const url = new URL(source)
@@ -505,7 +429,7 @@ function InlineVideo({ source }: { source: string }) {
   } catch { /* Non-YouTube file source. */ }
   const validId = /^[\w-]{11}$/.test(videoId)
   return <div className="showcase-video" aria-label="Student story video">
-    <div className="video-frame-mat">{validId ? <iframe src={`https://www.youtube-nocookie.com/embed/${videoId}?playsinline=1&rel=0&controls=1&origin=${encodeURIComponent(window.location.origin)}`} title="Student story video" loading="eager" referrerPolicy="origin" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowFullScreen /> : /^(data:video\/|blob:|\/)/.test(source) ? <video src={source} controls playsInline /> : <div className="inline-video-message">Please check the video URL.</div>}</div>
+    <div className="video-frame-mat">{validId ? <iframe ref={iframe} src={`https://www.youtube-nocookie.com/embed/${videoId}?enablejsapi=1&playsinline=1&rel=0&controls=1&origin=${encodeURIComponent(window.location.origin)}`} title="Student story video" loading="eager" referrerPolicy="origin" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowFullScreen /> : /^(data:video\/|blob:|\/)/.test(source) ? <video src={source} controls playsInline onPlay={() => setVideoPlaying(identity.current, true)} onPause={() => setVideoPlaying(identity.current, false)} onEnded={() => setVideoPlaying(identity.current, false)} onError={() => setVideoPlaying(identity.current, false)} /> : <div className="inline-video-message">Please check the video URL.</div>}</div>
   </div>
 }
 

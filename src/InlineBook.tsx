@@ -1,14 +1,8 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { getDocument, GlobalWorkerOptions, type PDFDocumentProxy } from 'pdfjs-dist'
-import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { bookSpreads, getBookSource, bookPreviewUrl, readerPageWidth, type BookPageSource } from './bookSources'
 import './inline-gallery.css'
 import './inline-book-reader.css'
 
-GlobalWorkerOptions.workerSrc = workerUrl
-
-const pdfDocuments = new Map<string, Promise<PDFDocumentProxy>>()
-const coverPreviews = new Map<string, Promise<HTMLCanvasElement>>()
-const renderedPages = new Map<string, Promise<HTMLCanvasElement>>()
 let pageTurnAudioContext: AudioContext | null = null
 
 function preparePageTurnAudio() {
@@ -51,204 +45,144 @@ function playPageTurnSound(context: AudioContext | null) {
   }
 }
 
-function canvasToImageUrl(canvas: HTMLCanvasElement) {
-  return new Promise<string>((resolve, reject) => {
-    canvas.toBlob((blob) => {
-      if (!blob) {
-        reject(new Error('Could not prepare the page image.'))
-        return
-      }
-      const url = URL.createObjectURL(blob)
-      const image = new Image()
-      image.onload = () => resolve(url)
-      image.onerror = () => {
-        URL.revokeObjectURL(url)
-        reject(new Error('Could not decode the page image.'))
-      }
-      image.src = url
-    }, 'image/jpeg', 0.94)
-  })
-}
 
-function getPdfDocument(src: string) {
-  const cached = pdfDocuments.get(src)
-  if (cached) return cached
-  const task = getDocument({ url: src, disableAutoFetch: true, disableStream: true, rangeChunkSize: 262144 })
-  const pending = task.promise.catch((error) => {
-    if (pdfDocuments.get(src) === pending) pdfDocuments.delete(src)
-    throw error
-  })
-  pdfDocuments.set(src, pending)
-  return pending
-}
-
-function renderPageToCanvas(pdf: PDFDocumentProxy, src: string, number: number, targetWidth = 1800) {
-  const key = `${src}:${number}:${targetWidth}`
-  const cached = renderedPages.get(key)
-  if (cached) return cached
-  const pending = pdf.getPage(number).then(async (page) => {
-    const viewport = page.getViewport({ scale: 1 })
-    const scaled = page.getViewport({ scale: targetWidth / viewport.width })
-    const canvas = window.document.createElement('canvas')
-    canvas.width = scaled.width
-    canvas.height = scaled.height
-    await page.render({ canvas, viewport: scaled }).promise
-    return canvas
-  }).catch((error) => {
-    if (renderedPages.get(key) === pending) renderedPages.delete(key)
-    throw error
-  })
-  renderedPages.set(key, pending)
-  return pending
-}
-
-export function preloadBookPreview(src: string) {
-  const cached = coverPreviews.get(src)
-  if (cached) return cached
-  const pending = getPdfDocument(src).then((pdf) => renderPageToCanvas(pdf, src, 1, 900)).catch((error) => {
-    if (coverPreviews.get(src) === pending) coverPreviews.delete(src)
-    throw error
-  })
-  coverPreviews.set(src, pending)
-  return pending
-}
-
-function BookPage({ document: pdf, number, src, preview }: { document: PDFDocumentProxy; number: number; src: string; preview: boolean }) {
-  const canvas = useRef<HTMLCanvasElement>(null)
-  const [ready, setReady] = useState(false)
-  const [error, setError] = useState(false)
+function CanvasFace({ canvas, className = '' }: { canvas: HTMLCanvasElement; className?: string }) {
+  const target = useRef<HTMLCanvasElement>(null)
   useLayoutEffect(() => {
-    let disposed = false
-    setError(false)
-    const drawCanvas = (buffer: HTMLCanvasElement) => {
-      const target = canvas.current
-      if (!target || disposed) return
-      target.width = buffer.width
-      target.height = buffer.height
-      target.getContext('2d')!.drawImage(buffer, 0, 0)
-      setReady(true)
-    }
-    const pageCanvas = preview && number === 1 ? preloadBookPreview(src) : renderPageToCanvas(pdf, src, number)
-    pageCanvas.then((buffer) => {
-      if (!disposed) {
-        drawCanvas(buffer)
-      }
-    }).catch(() => { if (!disposed) setError(true) })
-    return () => { disposed = true }
-  }, [pdf, number, src])
-  const canvasStyle = { opacity: ready ? 1 : 0 }
-  return <div className="pdf-leaf" aria-label={`Page ${number}`}><canvas ref={canvas} style={canvasStyle} />{!ready && <span role="status">{error ? 'Unable to render this page.' : `Loading page ${number}…`}</span>}</div>
+    const node = target.current
+    if (!node) return
+    node.width = canvas.width; node.height = canvas.height
+    node.getContext('2d')!.drawImage(canvas, 0, 0)
+  }, [canvas])
+  return <canvas ref={target} className={className} />
 }
 
-export default function InlineBook({ src, title, preview = false, onVisitGuestbook }: { src: string; title: string; preview?: boolean; onVisitGuestbook?: () => void }) {
-  const [document, setDocument] = useState<PDFDocumentProxy | null>(null)
+type Turn = { front: HTMLCanvasElement; back: HTMLCanvasElement; underlay?: HTMLCanvasElement; target: number; direction: 'forward' | 'backward'; id: number }
+export default function InlineBook({ src, source: providedSource, title, preview = false, onVisitGuestbook }: { src?: string; source?: BookPageSource; title: string; preview?: boolean; onVisitGuestbook?: () => void }) {
+  const [source, setSource] = useState<BookPageSource | null>(providedSource ?? null)
   const [spread, setSpread] = useState(0)
+  const [width, setWidth] = useState(preview ? 480 : 960)
+  const [pages, setPages] = useState<Record<number, HTMLCanvasElement>>({})
   const [error, setError] = useState('')
   const [attempt, setAttempt] = useState(0)
-  const [direction, setDirection] = useState('forward')
-  const [pageTurn, setPageTurn] = useState<{ frontImage: string; backImage: string; underlayImage?: string; direction: 'forward' | 'backward'; targetSpread: number; id: number } | null>(null)
-  const [isPreparingTurn, setIsPreparingTurn] = useState(false)
+  const [pageTurn, setPageTurn] = useState<Turn | null>(null)
+  const [preparing, setPreparing] = useState(false)
+  const [preparationMs, setPreparationMs] = useState<number | null>(null)
   const bookRoot = useRef<HTMLElement>(null)
   const touch = useRef<number | null>(null)
-  const lastTurn = useRef(0)
   const turning = useRef(false)
-  const pageTurnId = useRef(0)
+  const epoch = useRef(0)
+  const turnId = useRef(0)
+  const [previewFailed, setPreviewFailed] = useState(false)
+  const previewUrl = source?.previewUrl || (src ? bookPreviewUrl(src) : undefined)
+
   useEffect(() => {
-    let active = true
-    setDocument(null); setError(''); setSpread(0)
-    getPdfDocument(src).then((pdf) => { if (active) setDocument(pdf) }).catch(() => { if (active) setError('The book could not be loaded. Please try again.') })
-    return () => { active = false }
-  }, [src, attempt])
-  useEffect(() => {
-    if (!pageTurn) return
-    const { frontImage, backImage, underlayImage } = pageTurn
-    return () => {
-      URL.revokeObjectURL(frontImage)
-      URL.revokeObjectURL(backImage)
-      if (underlayImage) URL.revokeObjectURL(underlayImage)
+    const revision = ++epoch.current
+    setSource(providedSource ?? null); setSpread(0); setPages({}); setError(''); setPageTurn(null); setPreparing(false); setPreviewFailed(false); turning.current = false
+    if (!providedSource && src) void getBookSource(src).then((book) => {
+      if (epoch.current === revision) setSource(book)
+    }).catch(() => { if (epoch.current === revision) setError('The book could not be loaded. Please retry.') })
+    return () => { epoch.current = revision + 1 }
+  }, [src, providedSource, attempt])
+
+  useLayoutEffect(() => {
+    if (preview) { setWidth(480); return }
+    const root = bookRoot.current
+    if (!root) return
+    const resize = () => {
+      const measured = root.getBoundingClientRect().width
+      if (measured > 0) setWidth(readerPageWidth(measured))
     }
-  }, [pageTurn])
-  // Keep both covers single, including PDFs with an odd page count.
-  const spreads: number[][] = [[1]]
-  if (document) {
-    for (let n = 2; n < document.numPages; n += 2) spreads.push(n + 1 < document.numPages ? [n, n + 1] : [n])
-    if (document.numPages > 1) spreads.push([document.numPages])
-  }
+    resize()
+    const observer = new ResizeObserver(resize)
+    observer.observe(root)
+    return () => observer.disconnect()
+  }, [preview])
+
+  const spreads = bookSpreads(source?.numPages ?? 1)
   const last = spreads.length - 1
   const numbers = spreads[preview ? 0 : spread] ?? [1]
-  const coverSide = numbers.length === 1
-    ? numbers[0] === 1 ? 'front-cover' : numbers[0] === document?.numPages ? 'back-cover' : 'single-page'
-    : ''
+  const coverSide = numbers.length === 1 ? numbers[0] === 1 ? 'front-cover' : numbers[0] === source?.numPages ? 'back-cover' : 'single-page' : ''
+
+  useEffect(() => {
+    if (!source || (preview && previewUrl && !previewFailed)) return
+    let active = true
+    const current = bookSpreads(source.numPages)
+    const index = preview ? 0 : spread
+    const keep = new Set([...(current[index] ?? []), ...(current[index + 1] ?? []), ...(current[index + 2] ?? []), ...(current[index - 1] ?? [])])
+    setPages((old) => Object.fromEntries(Object.entries(old).filter(([number]) => keep.has(Number(number)))))
+    const prepare = async () => {
+      // Visible pages first; then the next two spreads and the previous one.
+      for (const position of preview ? [0] : [index, index + 1, index + 2, index - 1]) {
+        if (!active) return
+        await Promise.all((current[position] ?? []).map(async (number) => {
+          try {
+            const canvas = await source.render(number, width)
+            if (active) setPages((old) => old[number] === canvas ? old : { ...old, [number]: canvas })
+          } catch { if (active && position === index) setError('This page could not be loaded. Please retry.') }
+        }))
+      }
+    }
+    void prepare()
+    return () => { active = false }
+  }, [source, width, spread, preview, previewUrl, previewFailed, attempt])
+
   const turn = async (delta: number) => {
-    if (Date.now() - lastTurn.current < 100 || turning.current || pageTurn || !document) return
-    const targetSpread = Math.max(0, Math.min(last, spread + delta))
-    if (targetSpread === spread) return
-    const turnAudio = preparePageTurnAudio()
+    if (!source || preview || turning.current || pageTurn || !numbers.every((number) => pages[number])) return
+    const target = Math.max(0, Math.min(last, spread + delta))
+    if (target === spread) return
+    const revision = epoch.current
+    const started = performance.now()
+    const audio = preparePageTurnAudio()
     turning.current = true
-    setIsPreparingTurn(true)
-    lastTurn.current = Date.now()
-    const oldPage = delta > 0 ? numbers[numbers.length - 1] : numbers[0]
-    const oldCanvas = Array.from(bookRoot.current?.querySelectorAll<HTMLCanvasElement>('.real-spread > .pdf-leaf canvas') ?? [])
-      .find((canvas) => canvas.parentElement?.getAttribute('aria-label') === `Page ${oldPage}`)
+    setError('')
+    const next = spreads[target]
+    if (!next.every((number) => pages[number])) setPreparing(true)
     try {
-      const nextPages = spreads[targetSpread] ?? []
-      const renderedTargetPages = await Promise.all(nextPages.map((number) => renderPageToCanvas(document, src, number)))
-      if (!bookRoot.current) return
-      let hasTurnAnimation = false
-      if (oldCanvas) {
-        try {
-          const reversePageIndex = delta > 0 ? 0 : renderedTargetPages.length - 1
-          const underlayIndex = nextPages.length > 1 ? (delta > 0 ? nextPages.length - 1 : 0) : -1
-          const [turningPageImage, reversePageImage, underlayImage] = await Promise.all([
-            canvasToImageUrl(oldCanvas),
-            canvasToImageUrl(renderedTargetPages[reversePageIndex]),
-            underlayIndex >= 0 ? canvasToImageUrl(renderedTargetPages[underlayIndex]) : Promise.resolve(undefined),
-          ])
-          if (!bookRoot.current) {
-            URL.revokeObjectURL(turningPageImage)
-            URL.revokeObjectURL(reversePageImage)
-            if (underlayImage) URL.revokeObjectURL(underlayImage)
-            return
-          }
-          setPageTurn({
-            frontImage: turningPageImage,
-            backImage: reversePageImage,
-            underlayImage,
-            direction: delta > 0 ? 'forward' : 'backward',
-            targetSpread,
-            id: ++pageTurnId.current,
-          })
-          playPageTurnSound(turnAudio)
-          hasTurnAnimation = true
-        } catch { setPageTurn(null) }
-      }
-      setDirection(delta > 0 ? 'forward' : 'backward')
-      if (!hasTurnAnimation) {
-        setSpread(targetSpread)
-        turning.current = false
-        setIsPreparingTurn(false)
-      }
+      const canvases = await Promise.all(next.map((number) => source.render(number, width)))
+      if (epoch.current !== revision || !bookRoot.current) return
+      setPages((old) => ({ ...old, ...Object.fromEntries(next.map((number, index) => [number, canvases[index]])) }))
+      setPageTurn({ front: pages[delta > 0 ? numbers[numbers.length - 1] : numbers[0]], back: canvases[delta > 0 ? 0 : canvases.length - 1], underlay: next.length > 1 ? canvases[delta > 0 ? canvases.length - 1 : 0] : undefined, target, direction: delta > 0 ? 'forward' : 'backward', id: ++turnId.current })
+      setPreparing(false)
+      setPreparationMs(Math.round((performance.now() - started) * 10) / 10)
+      playPageTurnSound(audio)
     } catch {
-      turning.current = false
-      setIsPreparingTurn(false)
+      if (epoch.current === revision) { turning.current = false; setPreparing(false); setError('The next pages could not be loaded. Please try turning again.') }
     }
   }
-  const finishTurn = () => {
-    if (pageTurn) setSpread(pageTurn.targetSpread)
-    setPageTurn(null)
-    turning.current = false
-    setIsPreparingTurn(false)
-  }
-  return <section ref={bookRoot} className="inline-book" aria-label={`${title} picture book`} tabIndex={preview ? undefined : 0} onKeyDown={(e) => { if (!preview && (e.key === 'ArrowRight' || e.key === 'ArrowLeft')) { e.preventDefault(); turn(e.key === 'ArrowRight' ? 1 : -1) } }} onTouchStart={(e) => { touch.current = e.touches[0].clientX }} onTouchEnd={(e) => { if (!preview && touch.current !== null) { const delta = touch.current - e.changedTouches[0].clientX; if (Math.abs(delta) > 45) turn(delta > 0 ? 1 : -1) }; touch.current = null }}>
-    <div className="book-stage">{document ? <div className={`real-spread ${numbers.length === 1 ? 'cover-only' : ''} ${coverSide} ${direction}`}>
-      {numbers.map((number) => <BookPage key={number} document={document} number={number} src={src} preview={preview} />)}
-      {pageTurn?.underlayImage && <div className={`page-turn-underlay ${pageTurn.direction}`}><img className="pdf-leaf" src={pageTurn.underlayImage} alt="" draggable="false" /></div>}
-      {pageTurn && <div key={pageTurn.id} className={`page-turn-overlay ${pageTurn.direction}`} onAnimationEnd={(event) => { if (event.target === event.currentTarget) finishTurn() }}>
-        <img className="page-turn-face page-turn-front" src={pageTurn.frontImage} alt="" draggable="false" />
-        <img className="page-turn-face page-turn-back" src={pageTurn.backImage} alt="" draggable="false" />
-      </div>}
+  const finishTurn = useCallback(() => {
+    if (pageTurn) setSpread(pageTurn.target)
+    setPageTurn(null); turning.current = false; setPreparing(false)
+  }, [pageTurn])
+  useEffect(() => {
+    if (!pageTurn) return
+    const timer = setTimeout(finishTurn, 400)
+    return () => clearTimeout(timer)
+  }, [pageTurn, finishTurn])
+  useEffect(() => {
+    if (preview) return
+    const handleKey = (event: KeyboardEvent) => {
+      const root = bookRoot.current
+      if (!root || root.getClientRects().length === 0 || event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey) return
+      const target = event.target as HTMLElement | null
+      if (target?.closest('input, textarea, select, [contenteditable], [role="textbox"]')) return
+      const dialog = root.closest('[role="dialog"]')
+      const dialogs = Array.from(window.document.querySelectorAll('[role="dialog"]')).filter((element) => element.getClientRects().length > 0)
+      if (dialog && dialogs[dialogs.length - 1] !== dialog) return
+      if (event.key === 'ArrowRight' || event.key === 'ArrowLeft') { event.preventDefault(); void turn(event.key === 'ArrowRight' ? 1 : -1) }
+    }
+    window.addEventListener('keydown', handleKey)
+    return () => window.removeEventListener('keydown', handleKey)
+  })
+  const ready = numbers.every((number) => pages[number])
+  return <section ref={bookRoot} className="inline-book" aria-label={title + ' picture book'} tabIndex={preview ? undefined : 0} data-spread={spread} data-page-width={width} data-turn-preparation-ms={preparationMs} data-next-ready={(spreads[spread + 1] ?? []).every((number) => pages[number])} aria-busy={preparing || (!ready && !previewUrl)} onTouchStart={(event) => { touch.current = event.touches[0].clientX }} onTouchEnd={(event) => { if (!preview && touch.current !== null) { const delta = touch.current - event.changedTouches[0].clientX; if (Math.abs(delta) > 45) void turn(delta > 0 ? 1 : -1) } touch.current = null }}>
+    <div className="book-stage"><div className={'real-spread ' + (numbers.length === 1 ? 'cover-only ' : '') + coverSide}>
+      {numbers.map((number) => <div className="pdf-leaf" key={number} aria-label={'Page ' + number}>{pages[number] ? <CanvasFace canvas={pages[number]} /> : number === 1 && previewUrl && !previewFailed ? <img className="reader-page-image" src={previewUrl} alt={title + ' cover'} onError={() => setPreviewFailed(true)} /> : <div className="reader-page-placeholder"><span>{title}</span><small role="status">Preparing page {number}…</small></div>}</div>)}
+      {pageTurn?.underlay && <div className={'page-turn-underlay ' + pageTurn.direction}><CanvasFace canvas={pageTurn.underlay} className="pdf-leaf" /></div>}
+      {pageTurn && <div key={pageTurn.id} className={'page-turn-overlay ' + pageTurn.direction} onAnimationEnd={(event) => { if (event.target === event.currentTarget) finishTurn() }}><CanvasFace canvas={pageTurn.front} className="page-turn-face page-turn-front" /><CanvasFace canvas={pageTurn.back} className="page-turn-face page-turn-back" /></div>}
       {!preview && coverSide === 'back-cover' && !pageTurn && onVisitGuestbook && <button className="book-guestbook-cover" onClick={onVisitGuestbook}><span>Visit the Guestbook</span><small>Share your thoughts or leave a question about this book.</small></button>}
-      {!preview && <div className="page-hit-areas"><button disabled={spread === 0 || isPreparingTurn} aria-label="Previous pages" onClick={() => void turn(-1)} /><button disabled={spread === last || isPreparingTurn} aria-label="Next pages" onClick={() => void turn(1)} /></div>}
-    </div> : <div className="book-loading" role="status">{error || 'Opening your book…'}{error && !preview && <button onClick={() => setAttempt(attempt + 1)}>Retry</button>}</div>}</div>
+      {!preview && <div className="page-hit-areas"><button disabled={spread === 0 || preparing || !!pageTurn || !ready} aria-label="Previous pages" onClick={() => void turn(-1)} /><button disabled={spread === last || preparing || !!pageTurn || !ready} aria-label="Next pages" onClick={() => void turn(1)} /></div>}
+    </div></div>
+    {!preview && (preparing || error || !ready) && <div className="reader-status" role="status">{error || (preparing ? 'Preparing the next pages…' : 'Preparing your book…')}{error && <button onClick={() => setAttempt((value) => value + 1)}>Retry</button>}</div>}
   </section>
 }

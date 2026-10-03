@@ -1,0 +1,17 @@
+{
+  "/ebooks/ebook1.pdf": {
+    "numPages": 30,
+    "base": "/book-pages/ebook1-9902105c3191",
+    "version": "9902105c3191"
+  },
+  "/ebooks/ebook2.pdf": {
+    "numPages": 30,
+    "base": "/book-pages/ebook2-66d99cae8e72",
+    "version": "66d99cae8e72"
+  },
+  "/ebooks/ebook3.pdf": {
+    "numPages": 30,
+    "base": "/book-pages/ebook3-7a5cfac60b2d",
+    "version": "7a5cfac60b2d"
+  }
+}

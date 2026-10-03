@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { isVideoPlaying } from './videoPlayback'
 
 // The buffer loops continuously; gain automation fades each pass to silence.
 export function scheduleMusicPass(gain: AudioParam, start: number, duration: number, volume = 0.25) {
@@ -14,6 +15,21 @@ export function useBackgroundMusic(url?: string) {
   const [loading, setLoading] = useState(false)
   const stopRef = useRef<(() => void) | null>(null)
   const requestRef = useRef(0)
+  const contextRef = useRef<AudioContext | null>(null)
+  const [videoPlaying, setVideoPlaying] = useState(isVideoPlaying)
+  useEffect(() => {
+    const update = () => {
+      const paused = isVideoPlaying()
+      setVideoPlaying(paused)
+      const context = contextRef.current
+      if (context && context.state !== 'closed') {
+        if (paused) void context.suspend().catch(() => {})
+        else void context.resume().catch(() => {})
+      }
+    }
+    window.addEventListener('museum-video-playback', update)
+    return () => window.removeEventListener('museum-video-playback', update)
+  }, [])
   const stop = () => { requestRef.current++; stopRef.current?.(); stopRef.current = null; setPlaying(false); setLoading(false) }
   const enabledRef = useRef(true)
   useEffect(() => {
@@ -28,14 +44,15 @@ export function useBackgroundMusic(url?: string) {
     enabledRef.current = true
     const request = ++requestRef.current
     const context = new AudioContext()
+    contextRef.current = context
     const controller = new AbortController()
     let source: AudioBufferSourceNode | undefined
     let timer: ReturnType<typeof setInterval> | undefined
-    const unlock = () => { if (context.state === 'suspended') void context.resume().catch(() => {}) }
+    const unlock = () => { if (!isVideoPlaying() && context.state === 'suspended') void context.resume().catch(() => {}) }
     const removeUnlock = () => { window.removeEventListener('pointerdown', unlock); window.removeEventListener('keydown', unlock) }
     window.addEventListener('pointerdown', unlock)
     window.addEventListener('keydown', unlock)
-    stopRef.current = () => { removeUnlock(); controller.abort(); if (timer) clearInterval(timer); source?.stop(); void context.close() }
+    stopRef.current = () => { contextRef.current = null; removeUnlock(); controller.abort(); if (timer) clearInterval(timer); source?.stop(); void context.close() }
     setLoading(true)
     try {
       // Autoplay where allowed; the first interaction unlocks restricted browsers.
@@ -57,6 +74,7 @@ export function useBackgroundMusic(url?: string) {
         while (next < context.currentTime + 3600) { scheduleMusicPass(gain.gain, next, buffer.duration); next += buffer.duration }
       }
       schedule(); source.start(start); timer = setInterval(schedule, 10000)
+      if (isVideoPlaying()) await context.suspend()
       setLoading(false); setPlaying(true)
     } catch (error) {
       if (request !== requestRef.current) return
@@ -64,5 +82,5 @@ export function useBackgroundMusic(url?: string) {
       window.alert(error instanceof Error ? error.message : 'Could not play background music.')
     }
   }
-  return { playing: playing || loading, loading, toggle: () => void toggle() }
+  return { playing: (playing || loading) && !videoPlaying, loading, toggle: () => void toggle() }
 }

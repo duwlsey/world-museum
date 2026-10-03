@@ -39,12 +39,11 @@ button:disabled { cursor: not-allowed; }
   border-bottom: 1px solid var(--gallery-line);
   box-shadow: 0 3px 14px rgba(30, 32, 31, .035);
 }
-.site-header > .translate-slot { display: none !important; }
 .header-left { flex: 0 0 auto; }
 .brand { display: inline-flex; align-items: center; min-height: 44px; color: var(--gallery-ink); font-size: 19px; line-height: 1; letter-spacing: .13em; white-space: nowrap; }
 .header-right { min-width: 0; margin-left: auto; gap: clamp(15px, 2.3vw, 34px); }
 .header-right nav { min-width: 0; gap: clamp(12px, 1.8vw, 26px); }
-.header-right nav a, .language-menu > button, .auth-links button, .user-menu button {
+.header-right nav a, .auth-links button, .user-menu button {
   display: inline-flex;
   min-height: 42px;
   align-items: center;
@@ -63,12 +62,7 @@ button:disabled { cursor: not-allowed; }
 .header-right nav a { position: relative; }
 .header-right nav a::after { position: absolute; right: 0; bottom: 6px; left: 0; height: 1px; background: currentColor; content: ""; transform: scaleX(0); transform-origin: left; transition: transform .2s ease; }
 .header-right nav a:hover::after, .header-right nav a.active::after { transform: scaleX(1); }
-.header-right nav a:hover, .language-menu > button:hover, .auth-links button:hover, .user-menu button:hover { color: var(--gallery-wood); }
-.language-menu { position: relative; flex: 0 0 auto; }
-.language-menu > button { padding-inline: 8px; border-left: 1px solid var(--gallery-line); }
-.language-popover { z-index: 40; min-width: 132px; padding: 6px; border: 1px solid var(--gallery-line); background: var(--gallery-white); box-shadow: 0 12px 28px rgba(26, 28, 27, .12); }
-.language-popover button { display: block; width: 100%; min-height: 38px; padding: 8px 10px; border: 0; background: transparent; text-align: left; }
-.language-popover button:hover { background: var(--gallery-wall); }
+.header-right nav a:hover, .auth-links button:hover, .user-menu button:hover { color: var(--gallery-wood); }
 .auth-links, .user-menu { flex: 0 0 auto; gap: clamp(10px, 1.4vw, 20px); }
 .auth-links button:last-child { padding-inline: 3px; border: 0; }
 .user-menu { min-width: 0; }
@@ -173,9 +167,7 @@ footer a:hover { color: var(--gallery-ink); }
   .header-right nav { flex: 1 1 auto; min-width: 0; gap: 15px; overflow-x: auto; scrollbar-width: none; }
   .header-right nav::-webkit-scrollbar { display: none; }
   .header-right nav a { min-height: 36px; font-size: 10px; }
-  .header-right nav a::after { bottom: 2px; }
-  .language-menu > button, .auth-links button, .user-menu button { min-height: 36px; font-size: 10px; }
-  .language-menu > button { padding-inline: 7px; }
+  .header-right nav a::after { bottom: 2px; } .auth-links button, .user-menu button { min-height: 36px; font-size: 10px; }
   .auth-links, .user-menu { gap: 8px; }
   .user-menu > span { max-width: min(34vw, 150px); gap: 5px; overflow: hidden; font-size: 10px; text-overflow: ellipsis; }
   .user-menu em { padding: 2px 5px; font-size: 8px; }
@@ -195,7 +187,6 @@ footer a:hover { color: var(--gallery-ink); }
   .user-menu em { display: none; }
   .auth-links { gap: 7px; }
   .auth-links button { font-size: 9px; letter-spacing: .025em; }
-  .language-menu > button { padding-inline: 4px; font-size: 9px; }
   .floor-card { grid-template-columns: 54px minmax(0, 1fr) 18px; gap: 11px; padding-inline: 2px; }
   .floor-card h3 { font-size: 16px; line-height: 1.25; }
   .floor-card p { font-size: 11px; }
@@ -418,7 +409,7 @@ h2, .admin-section-head h2, .framework-room h2, .spotlight-room h2, .activity-ro
 }
 h3, .floor-card h3, .cms-editor h3 { font-weight: 500 !important; }
 .brand { font-weight: 600; }
-.header-right nav a, .language-menu > button, .auth-links button, .user-menu button,
+.header-right nav a, .auth-links button, .user-menu button,
 .next-button, .submit, .cms-save, .generate-button, .wizard-footer .next-button {
   font-weight: 500;
 }
@@ -1768,7 +1759,6 @@ main.three-floor .three-showcase .guestbook-signin {
 }
 .site-header.home-header .brand,
 .site-header.home-header .header-right nav a,
-.site-header.home-header .language-menu > button,
 .site-header.home-header .auth-links button,
 .site-header.home-header .user-menu button { color: #242625; }
 @supports (animation-timeline: scroll()) {
@@ -1851,7 +1841,6 @@ main.three-floor .three-showcase .guestbook-signin {
     flex: 0 0 auto;
     font-size: 9px;
   }
-  .site-header.home-header .language-menu { grid-area: language; }
   .site-header.home-header .user-menu,
   .site-header.home-header .auth-links { grid-area: account; justify-self: end; }
   .site-header.home-header .user-menu > span { max-width: 100px; }
@@ -2643,7 +2632,6 @@ html { scrollbar-gutter: stable; }
 @media(max-width: 900px) {
   .site-header .header-right, .site-header.home-header .header-right { display: grid; width: 100%; grid-template-columns: auto minmax(0, 1fr); grid-template-rows: 36px 36px; grid-template-areas: "floors floors" "language account"; gap: 0 10px; }
   .site-header .header-right nav, .site-header.home-header .header-right nav { grid-area: floors; grid-template-columns: repeat(5, 44px); width: 100%; gap: clamp(8px, 3vw, 18px); }
-  .site-header .language-menu { grid-area: language; }
   .site-header .header-right > :is(.user-menu, .auth-links) { grid-area: account; justify-self: end; width: min(240px, 100%); max-width: 100%; }
   .site-header.home-header, .site-header.home-header.is-visible { min-height: 116px; grid-template-rows: 32px 72px; }
 }
