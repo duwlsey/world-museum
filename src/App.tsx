@@ -19,8 +19,17 @@ const floors = [
 const roleLabel: Record<Role, string> = { teacher: 'TEACHER', author: '✏️ AUTHOR', student: 'STUDENT' }
 type MuseumNote = { id: string; floor: '3f' | '4f'; artist_index: number | null; book_id: string | null; owner_id: string; owner_username: string; owner_role: Role | 'guest'; body: string; created_at: string }
 type CmsArtist = { name: string; title: string; scope: string; pdf?: string; video?: string }
-type FooterContent = { copyright: string; projectLabel: string; teacherLabel: string; email: string }
-const defaultFooter: FooterContent = { copyright: "© 2026 Jangheung Glocal Educational Center", projectLabel: "World Docent", teacherLabel: "교사 김여진", email: "teach4stu@gmail.com" }
+type FooterContent = { copyright: string; projectLabel: string; teacherLabel: string; websiteUrl: string }
+const defaultFooter: FooterContent = { copyright: "© 2026 Jangheung Glocal Educational Center", projectLabel: "World Docent", teacherLabel: "교사 김여진", websiteUrl: "https://duwlsey.github.io/profile/" }
+function getFooterContent(content?: FooterContent): FooterContent {
+  const websiteUrl = content?.websiteUrl?.trim()
+  try {
+    const url = new URL(websiteUrl || '')
+    if (url.protocol === 'https:' || url.protocol === 'http:') return { ...defaultFooter, ...content, websiteUrl: url.href }
+  } catch { /* Older saved footers contain an email instead of a website URL. */ }
+  return { ...defaultFooter, ...content, websiteUrl: defaultFooter.websiteUrl }
+}
+
 type MusicContent = { url: string; name: string }
 type CmsState = { music?: MusicContent; footer?: FooterContent; about: string; framework: string[]; spotlight: string; rwanda: string[]; artists: CmsArtist[]; activityImages: string[] }
 const coverColors = [
@@ -44,16 +53,7 @@ function Header({ visible, openAuth }: { visible: boolean; openAuth: (mode: 'log
 }
 
 function Footer({ sound, toggleSound, content }: { sound: boolean; toggleSound: () => void; content: FooterContent }) {
-  const [copyStatus, setCopyStatus] = useState('')
-  const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
-  useEffect(() => () => { if (copyTimer.current) clearTimeout(copyTimer.current) }, [])
-  const copyEmail = async () => {
-    try { await navigator.clipboard.writeText(content.email); setCopyStatus('copied') }
-    catch { setCopyStatus('Could not copy email. Please try again.') }
-    if (copyTimer.current) clearTimeout(copyTimer.current)
-    copyTimer.current = setTimeout(() => setCopyStatus(''), 1000)
-  }
-  return <footer className="museum-footer"><div><span>{content.copyright}</span><a href="/1f">{content.projectLabel}</a><button className="footer-email" type="button" onClick={() => void copyEmail()} title={content.email}>{content.teacherLabel}<span className="footer-copy-status" role="status" aria-live="polite">{copyStatus}</span></button></div><button className="sound" onClick={toggleSound} aria-pressed={sound} aria-label={sound ? '배경음악 끄기' : '배경음악 켜기'}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M11 5 6 9H3v6h3l5 4Z" />{sound ? <><path d="M15 8a6 6 0 0 1 0 8" /><path d="M18 5a10 10 0 0 1 0 14" /></> : <path d="m16 9 5 6m0-6-5 6" />}</svg></button></footer>
+  return <footer className="museum-footer"><div><span>{content.copyright}</span><a href="/1f">{content.projectLabel}</a><a className="footer-email" href={getFooterContent(content).websiteUrl} target="_blank" rel="noopener noreferrer" title="프로필 사이트 열기 (새 탭)">{content.teacherLabel}</a></div><button className="sound" onClick={toggleSound} aria-pressed={sound} aria-label={sound ? '배경음악 끄기' : '배경음악 켜기'}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M11 5 6 9H3v6h3l5 4Z" />{sound ? <><path d="M15 8a6 6 0 0 1 0 8" /><path d="M18 5a10 10 0 0 1 0 14" /></> : <path d="m16 9 5 6m0-6-5 6" />}</svg></button></footer>
 }
 
 function Entrance({ activateHeader }: { activateHeader: () => void }) {
@@ -555,10 +555,10 @@ function CmsDashboard({ cms, saveCms, books, deleteBook, updateBook, notes, addN
   return <section className="cms-tabs"><nav>{([['1f','1F DOCENT'],['2f','2F RWANDA'],['3f','3F JANGHEUNG'],['4f','4F FROM YOU']] as const).map(([value,label]) => <button className={tab === value ? 'active' : ''} onClick={() => setTab(value)} key={value}>{label}</button>)}</nav><div className="cms-editor">{tab === '1f' && <><h3>1F DOCENT</h3><label>Section 1 · Introduction<textarea value={draft.about} onChange={(e) => set('about', e.target.value)} /></label>{draft.framework.map((text,index) => <label key={index}>Section 2 · Framework {index + 1}<textarea value={text} onChange={(e) => set('framework', draft.framework.map((item,itemIndex) => itemIndex === index ? e.target.value : item))} /></label>)}<label>Section 3 · Spotlight<textarea value={draft.spotlight} onChange={(e) => set('spotlight', e.target.value)} /></label><label>Activity image upload<input type="file" accept="image/*" onChange={(e) => { const file = e.target.files?.[0]; if (file) void fileToUrl(file, 'cms/activity', (url) => set('activityImages', [...draft.activityImages, url])) }} /></label><div className="cms-assets">{draft.activityImages.map((image,index) => <span key={image}><img src={image} alt="Activity" /><button onClick={() => set('activityImages', draft.activityImages.filter((_, itemIndex) => itemIndex !== index))}>Delete</button></span>)}</div><button className="cms-save" onClick={() => saveCms(draft)}>Save 1F</button></>}{tab === '2f' && <><h3>2F RWANDA</h3>{draft.rwanda.map((text,index) => <label key={index}>Paragraph {index + 1}<textarea value={text} onChange={(e) => set('rwanda', draft.rwanda.map((item,itemIndex) => itemIndex === index ? e.target.value : item))} /></label>)}<button className="cms-save" onClick={() => saveCms(draft)}>Save 2F</button></>}{tab === '3f' && <><h3>3F JANGHEUNG</h3>{draft.artists.map((artist,index) => <article className="cms-artist" key={index}><label>Student name<input value={artist.name} onChange={(e) => updateArtist(index,'name',e.target.value)} /></label><label>Book title<input value={artist.title} onChange={(e) => updateArtist(index,'title',e.target.value)} /></label><label>Scope<input value={artist.scope} onChange={(e) => updateArtist(index,'scope',e.target.value)} /></label><label>Book PDF<input type="file" accept="application/pdf" onChange={(e) => { const file=e.target.files?.[0]; if(file) void fileToUrl(file,'cms/ebooks',(url)=>updateArtist(index,'pdf',url)) }} />{artist.pdf && <small>PDF attached</small>}</label><label>Video URL<input value={artist.video ?? ''} onChange={(e) => updateArtist(index,'video',e.target.value)} placeholder="YouTube URL" /></label></article>)}<button className="cms-save" onClick={() => saveCms(draft)}>Save 3F</button></>}{tab === '4f' && <><h3>4F FROM YOU</h3><div className="cms-books">{books.length ? books.map((book) => <article key={book.id}><strong>{book.title}</strong><small>by {book.author}</small><button onClick={() => setOpenBook(book)}>View e-Book</button><button onClick={() => download(book)}>Download PDF</button><button onClick={() => void deleteBook(book.id)}>Delete</button></article>) : <p>No published books yet.</p>}</div></>}</div><AnimatePresence>{openBook && <PublishedBook book={openBook} updateBook={updateBook} notes={notes.filter((note) => note.floor === '4f' && note.book_id === openBook.id)} addNote={addNote} updateNote={updateNote} deleteNote={deleteNote} close={() => setOpenBook(null)} />}</AnimatePresence></section>
 }
 function FooterSetting({ cms, saveCms }: { cms: CmsState; saveCms: (next: CmsState) => Promise<boolean> }) {
-  const [draft, setDraft] = useState<FooterContent>(cms.footer ?? defaultFooter)
+  const [draft, setDraft] = useState<FooterContent>(getFooterContent(cms.footer))
   const [saving, setSaving] = useState(false), [message, setMessage] = useState('')
-  useEffect(() => { setDraft(cms.footer ?? defaultFooter) }, [cms.footer])
-  return <section className="footer-settings"><h1 className="admin-view-title">Footer Management</h1><form className="cms-editor" onSubmit={async (event) => { event.preventDefault(); setSaving(true); setMessage(''); try { if (await saveCms({ ...cms, footer: { ...draft, email: draft.email.trim() } })) setMessage('Footer saved.') } finally { setSaving(false) } }}>{([['copyright', 'Copyright text'], ['projectLabel', 'Project link text'], ['teacherLabel', 'Teacher link text'], ['email', 'Teacher email']] as const).map(([key, label]) => <label key={key}>{label}<input required type={key === 'email' ? 'email' : 'text'} value={draft[key]} onChange={(event) => { setDraft({ ...draft, [key]: event.target.value }); setMessage('') }} /></label>)}<button className="cms-save" disabled={saving} type="submit">{saving ? 'Saving…' : 'Save footer'}</button>{message && <small role="status">{message}</small>}</form></section>
+  useEffect(() => { setDraft(getFooterContent(cms.footer)) }, [cms.footer])
+  return <section className="footer-settings"><h1 className="admin-view-title">Footer Management</h1><form className="cms-editor" onSubmit={async (event) => { event.preventDefault(); setSaving(true); setMessage(''); try { if (await saveCms({ ...cms, footer: { ...draft, websiteUrl: draft.websiteUrl.trim() } })) setMessage('Footer saved.') } finally { setSaving(false) } }}>{([['copyright', 'Copyright text'], ['projectLabel', 'Project link text'], ['teacherLabel', 'Teacher link text'], ['websiteUrl', 'Teacher website URL']] as const).map(([key, label]) => <label key={key}>{label}<input required type={key === 'websiteUrl' ? 'url' : 'text'} pattern={key === 'websiteUrl' ? 'https?://.+' : undefined} value={draft[key]} onChange={(event) => { setDraft({ ...draft, [key]: event.target.value }); setMessage('') }} /></label>)}<button className="cms-save" disabled={saving} type="submit">{saving ? 'Saving…' : 'Save footer'}</button>{message && <small role="status">{message}</small>}</form></section>
 }
 
 function MusicSetting({ cms, saveCms }: { cms: CmsState; saveCms: (next: CmsState) => Promise<boolean> }) {
